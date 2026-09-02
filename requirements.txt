@@ -1,2 +1,6 @@
-python-telegram-bot
 hyperliquid-python-sdk
+python-telegram-bot
+eth-account
+fastapi
+uvicorn[standard]
+jinja2

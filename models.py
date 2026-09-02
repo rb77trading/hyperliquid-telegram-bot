@@ -44,6 +44,7 @@ class OrderInfo:
     limit_px: float        # Limit-Preis
     size: float            # Order-Größe in Base-Asset
     notional: float        # Nominalwert = limit_px * size (USDC)
+    oid: int = 0           # Order-ID (für Cancel/Modify)
 
 
 # ─── Account Summary ───────────────────────────────────────────────────────────

@@ -22,7 +22,7 @@ TELEGRAM_CHAT_ID = "YOUR_CHAT_ID_HERE"
 # ─── Hyperliquid ───────────────────────────────────────────────────────────────
 
 # Wallet-Adresse, für die der Bot Kontodaten anzeigt
-WALLET_ADDRESS = "YOUR_WALLET_ADRESS_HERE"
+WALLET_ADDRESS = "YOUR_WALLET_ADDRESS_HERE"
 
 # Liste der Builder-DEXe, die mitabgefragt werden sollen.
 # None  → automatisch ALLE aktiven DEXe via perpDexs-Endpoint.
@@ -46,3 +46,21 @@ NOTIFY_ORDER_UPDATES = True
 # Empfehlung: 3 (reicht in der Praxis immer, da beide Events
 # innerhalb von <1s eintreffen).
 EDIT_WINDOW = 3
+
+# ─── Trading ───────────────────────────────────────────────────────────────────
+
+# True  → Order-Buttons (Stornieren/Bearbeiten) in der Orders-Ansicht
+# False → Nur read-only (Standard)
+TRADING_ENABLED = False
+
+# Private Key der Agent-Wallet (NUR für Trading, nicht die Main-Wallet!)
+# Empfohlen: Separate Agent-Wallet mit begrenztem USDC-Bestand anlegen.
+AGENT_PRIVATE_KEY = "YOUR_AGENT_PRIVATE_KEY_HERE"
+
+# ─── Web Dashboard ─────────────────────────────────────────────────────────────
+# True  → Menü-Button zeigt auf Web-Dashboard (falls erreichbar)
+# False → Reiner Telegram-Betrieb (Standard)
+WEB_ENABLED = False
+WEB_HOST = "0.0.0.0"
+WEB_PORT = 8000
+WEB_URL = "http://192.168.178.11:8000"  # Externe URL (für Telegram-Menü-Button)

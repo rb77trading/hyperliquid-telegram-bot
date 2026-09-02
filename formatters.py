@@ -95,16 +95,29 @@ def format_positions(summary: AccountSummary) -> str:
     return "\n".join(lines)
 
 
-def format_orders(summary: AccountSummary) -> str:
+def format_orders(summary: AccountSummary, trading_enabled: bool = False) -> tuple[str, list]:
     """
-    Formatiert alle offenen Orders, gruppiert nach DEX.
+    Formatiert offene Orders, gruppiert nach DEX.
 
-    Pro Order: Richtung, Coin, Größe, Limit-Preis, Nominalwert.
+    Args:
+        summary:         AccountSummary mit Orders.
+        trading_enabled: True → Inline-Buttons pro Order (nummeriert).
+
+    Returns:
+        (caption_text, button_rows)
+        button_rows ist [], wenn trading_enabled=False.
     """
+    from telegram import InlineKeyboardButton
+
     if not any(summary.orders_by_dex.values()):
-        return f"⏳ <b>Offene Orders</b> <code>{_timestamp()}</code>\n\nKeine offenen Orders."
+        return (
+            f"⏳ <b>Offene Orders</b> <code>{_timestamp()}</code>\n\nKeine offenen Orders.",
+            [],
+        )
 
     lines = [f"⏳ <b>Offene Orders</b> <code>{_timestamp()}</code>", ""]
+    button_rows = []
+    order_index = 0
 
     for dex_name, orders in summary.orders_by_dex.items():
         if not orders:
@@ -117,9 +130,17 @@ def format_orders(summary: AccountSummary) -> str:
             side_emoji = "🟢" if o.side == "B" else "🔴"
             side_label = "BUY" if o.side == "B" else "SELL"
             lines.append(
-                f"{side_emoji} {side_label} {o.size:.4f} {o.coin} "
+                f"[{order_index + 1}] {side_emoji} {side_label} {o.size:.4f} {o.coin} "
                 f"@ ${o.limit_px:,.2f} (Wert: {o.notional:.2f} USDC)"
             )
+
+            if trading_enabled:
+                button_rows.append([
+                    InlineKeyboardButton(f"{order_index + 1} ❌", callback_data=f"oc:{order_index}"),
+                    InlineKeyboardButton(f"{order_index + 1} ✏️", callback_data=f"oe:{order_index}"),
+                ])
+                order_index += 1
+
         lines.append("")
 
-    return "\n".join(lines)
+    return "\n".join(lines), button_rows

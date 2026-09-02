@@ -357,6 +357,7 @@ def _extract_orders(raw_orders: list[dict]) -> list[OrderInfo]:
             limit_px=limit_px,
             size=sz,
             notional=limit_px * sz,  # Nominalwert in USDC
+            oid=int(o.get("oid", 0)),
         ))
     return orders
 

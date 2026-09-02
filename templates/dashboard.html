@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="de" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hyperliquid Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        hl: {
+                            bg: '#0b0e14',
+                            card: '#141821',
+                            border: '#1e2433',
+                            accent: '#6366f1',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-hl-bg text-gray-300 min-h-screen p-4 md:p-8">
+
+<div class="max-w-6xl mx-auto space-y-6">
+
+    <!-- Header -->
+    <header class="flex items-center justify-between">
+        <div>
+            <h1 class="text-2xl font-bold text-white">🌐 Hyperliquid Dashboard</h1>
+            <p class="text-sm text-gray-500 mt-1">Testseite · Mock-Daten</p>
+        </div>
+        <div class="flex items-center gap-3">
+            <span class="text-xs px-2 py-1 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/30">
+                {{ summary.account_mode }}
+            </span>
+            <span class="text-xs px-2 py-1 rounded bg-green-500/10 text-green-400 border border-green-500/30">
+                Trading aktiv
+            </span>
+        </div>
+    </header>
+
+    <!-- Kontostand-Karten -->
+    <section class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div class="bg-hl-card rounded-xl p-4 border border-hl-border">
+            <p class="text-xs text-gray-500 mb-1">Gesamt-Guthaben</p>
+            <p class="text-xl font-bold text-white">
+                {{ "{:,.2f}".format(summary.total_balance) }}
+                <span class="text-sm font-normal text-gray-400">USDC</span>
+            </p>
+        </div>
+        <div class="bg-hl-card rounded-xl p-4 border border-hl-border">
+            <p class="text-xs text-gray-500 mb-1">Unrealisierter PnL</p>
+            <p class="text-xl font-bold {{ 'text-green-400' if summary.unrealized_pnl >= 0 else 'text-red-400' }}">
+                {{ "%+,.2f".format(summary.unrealized_pnl) }}
+                <span class="text-sm font-normal text-gray-400">USDC</span>
+            </p>
+        </div>
+        <div class="bg-hl-card rounded-xl p-4 border border-hl-border">
+            <p class="text-xs text-gray-500 mb-1">Abhebbar</p>
+            <p class="text-xl font-bold text-white">
+                {{ "{:,.2f}".format(summary.withdrawable) }}
+                <span class="text-sm font-normal text-gray-400">USDC</span>
+            </p>
+        </div>
+        <div class="bg-hl-card rounded-xl p-4 border border-hl-border">
+            <p class="text-xs text-gray-500 mb-1">Gebunden</p>
+            <p class="text-xl font-bold text-yellow-400">
+                {{ "{:,.2f}".format(summary.capital_in_orders + summary.capital_in_positions) }}
+                <span class="text-sm font-normal text-gray-400">USDC</span>
+            </p>
+        </div>
+    </section>
+
+    <!-- Positionen -->
+    <section class="bg-hl-card rounded-xl border border-hl-border overflow-hidden">
+        <div class="px-4 py-3 border-b border-hl-border">
+            <h2 class="font-semibold text-white">📈 Offene Positionen</h2>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="text-gray-500 text-left border-b border-hl-border">
+                        <th class="px-4 py-2 font-medium">Coin</th>
+                        <th class="px-4 py-2 font-medium">Seite</th>
+                        <th class="px-4 py-2 font-medium">Hebel</th>
+                        <th class="px-4 py-2 font-medium">Größe</th>
+                        <th class="px-4 py-2 font-medium">Einstieg</th>
+                        <th class="px-4 py-2 font-medium">Aktuell</th>
+                        <th class="px-4 py-2 font-medium">PnL</th>
+                        <th class="px-4 py-2 font-medium">ROE</th>
+                        <th class="px-4 py-2 font-medium text-right">Aktion</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in summary.positions %}
+                    <tr class="border-b border-hl-border hover:bg-white/[0.02]">
+                        <td class="px-4 py-3 font-medium text-white">{{ p.coin }}</td>
+                        <td class="px-4 py-3">
+                            <span class="text-xs px-2 py-0.5 rounded
+                                {{ 'bg-green-500/10 text-green-400' if p.side == 'LONG' else 'bg-red-500/10 text-red-400' }}">
+                                {{ p.side }}
+                            </span>
+                        </td>
+                        <td class="px-4 py-3 text-gray-400">{{ p.leverage }}x</td>
+                        <td class="px-4 py-3">{{ "%.4f"|format(p.size) }}</td>
+                        <td class="px-4 py-3">${{ "{:,.2f}".format(p.entry_px) }}</td>
+                        <td class="px-4 py-3">${{ "{:,.2f}".format(p.mark_px) }}</td>
+                        <td class="px-4 py-3 {{ 'text-green-400' if p.unrealized_pnl >= 0 else 'text-red-400' }}">
+                            {{ "%+.2f"|format(p.unrealized_pnl) }}
+                        </td>
+                        <td class="px-4 py-3 {{ 'text-green-400' if p.roe >= 0 else 'text-red-400' }}">
+                            {{ "%+.2f"|format(p.roe * 100) }}%
+                        </td>
+                        <td class="px-4 py-3 text-right">
+                            <button class="text-xs px-3 py-1.5 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/30 transition">
+                                ✕ Schließen
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- Orders -->
+    <section class="bg-hl-card rounded-xl border border-hl-border overflow-hidden">
+        <div class="px-4 py-3 border-b border-hl-border flex items-center justify-between">
+            <h2 class="font-semibold text-white">⏳ Offene Orders</h2>
+            <span class="text-xs text-gray-500">{{ summary.orders|length }} Orders</span>
+        </div>
+        <div class="divide-y divide-hl-border">
+            {% for o in summary.orders %}
+            <div class="px-4 py-3 flex items-center justify-between hover:bg-white/[0.02]">
+                <div class="flex items-center gap-3">
+                    <span class="text-lg">{{ '🟢' if o.side == 'B' else '🔴' }}</span>
+                    <div>
+                        <p class="font-medium text-white text-sm">
+                            {{ 'BUY' if o.side == 'B' else 'SELL' }}
+                            {{ "%.4f"|format(o.size) }} {{ o.coin }}
+                            <span class="text-gray-400">@ ${{ "{:,.2f}".format(o.limit_px) }}</span>
+                        </p>
+                        <p class="text-xs text-gray-500 mt-0.5">
+                            Wert: {{ "{:,.2f}".format(o.notional) }} USDC · OID: {{ o.oid }}
+                        </p>
+                    </div>
+                </div>
+                <div class="flex gap-2">
+                    <button class="text-xs px-3 py-1.5 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/30 transition">
+                        ❌ Stornieren
+                    </button>
+                    <button class="text-xs px-3 py-1.5 rounded-lg bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 border border-blue-500/30 transition">
+                        ✏️ Bearbeiten
+                    </button>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="text-center text-xs text-gray-600 pt-4">
+        Testseite · Mock-Daten · Keine echte API-Kommunikation
+    </footer>
+
+</div>
+
+</body>
+</html>   
