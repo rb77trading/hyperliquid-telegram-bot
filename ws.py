@@ -359,6 +359,12 @@ def _side_label(order: dict) -> str:
 _recent_opens: dict[tuple, tuple[float, dict, threading.Timer]] = {}
 _recent_cancels: dict[tuple, tuple[float, dict, threading.Timer]] = {}
 
+# Puffer für kürzliche Fills zur Market-Order-Erkennung
+# Struktur: {oid: timestamp} - OID-basierte Korrelation ist zuverlässiger
+_recent_fills: dict[int, float] = {}
+_recent_fills_lock = threading.Lock()
+MARKET_ORDER_WINDOW = 5  # Sekunden, in denen ein "open" nach einem Fill als Market-Order ignoriert wird
+
 # Schützt _recent_opens UND _recent_cancels vor gleichzeitigen Zugriffen aus
 # dem WS-Thread (_find_match/_buffer_order) und den threading.Timer-Threads
 # (_flush_open_notify/_flush_cancel_notify). Ein einziges Lock für beide
@@ -583,6 +589,7 @@ def _on_fills(ws_msg: dict) -> None:
 def _notify_fill(fill: dict) -> None:
     """
     Formatiert und sendet eine EIGENE Telegram-Nachricht für einen Fill.
+    Speichert den Fill auch im _recent_fills Puffer zur Market-Order-Erkennung.
 
     Args:
         fill: Ein Fill-Objekt aus der userFills-Message.
@@ -597,6 +604,12 @@ def _notify_fill(fill: dict) -> None:
     fee = float(fill.get("fee", 0))
     liquidation = fill.get("liquidation")
     time_ms = fill.get("time", int(time.time() * 1000))
+    oid = fill.get("oid", 0)
+
+    # Fill im Puffer speichern für Market-Order-Erkennung (OID-basiert)
+    if oid:
+        with _recent_fills_lock:
+            _recent_fills[oid] = time.time()
 
     # ── Emoji und Label bestimmen ─────────────────────────────────────────────
     side_emoji = "🟢" if side == "B" else "🔴"
@@ -755,15 +768,47 @@ def _on_order_updates(ws_msg: dict) -> None:
         # Stop-Market/Take-Profit-Trigger-Orders sind NICHT betroffen, da sie
         # isTrigger=true haben und nicht "Ioc" als tif nutzen.
         #
-        # WICHTIG: orderType allein reicht hier NICHT als Filter – getestet
-        # meldet Hyperliquid diese Orders offenbar mit orderType="Limit",
-        # nicht "Market" (die Order IST intern technisch eine Limit-Order,
-        # nur mit tif=Ioc). Das zuverlässige Signal ist daher tif == "Ioc":
-        # eine IOC-Order "rastet" per Definition nie wirklich auf dem
-        # Orderbuch ein – sie füllt sofort (→ userFills) oder wird verworfen.
-        logger.info(f"DEBUG order: {order}")
-        if status in ("open", "canceled") and order.get("tif") == "Ioc":
-            continue
+        # MARKET-ORDER FILTERUNG (Multi-Strategie):
+        # 1. IOC-Filter (tif == "Ioc")
+        # 2. Market-Type Filter (orderType == "Market") 
+        # 3. OID-Korrelation (bei HIP-3 Coins ohne tif/orderType)
+        if status in ("open", "canceled"):
+            tif = order.get("tif")
+            order_type = order.get("orderType")
+            is_trigger = order.get("isTrigger", False)
+            
+            # Strategie 1: IOC-Filter (Standardfall)
+            if tif == "Ioc":
+                logger.info(f"IOC-Order gefiltert: {order.get('coin')}")
+                continue
+            
+            # Strategie 2: Market-Type Filter (einige DEXe)
+            if order_type == "Market" and not is_trigger:
+                logger.info(f"Market-Order gefiltert (orderType): {order.get('coin')}")
+                continue
+            
+            # Strategie 3: Fill-Korrelation für HIP-3 Coins
+            # Wenn es kürzlich einen Fill mit derselben OID gab,
+            # ist das "open"-Event sicher die Market-Order-Bestätigung
+            oid = order.get("oid", 0)
+            
+            if oid:
+                with _recent_fills_lock:
+                    now = time.time()
+                    cutoff = now - MARKET_ORDER_WINDOW
+                    
+                    # Verfallene Einträge aufräumen (in-place)
+                    expired_oids = [k for k, v in _recent_fills.items() if v <= cutoff]
+                    for k in expired_oids:
+                        del _recent_fills[k]
+                    
+                    # Prüfen ob es kürzlich einen Fill mit dieser OID gab
+                    if oid in _recent_fills:
+                        coin = order.get("coin", "")
+                        logger.info(f"Market-Order gefiltert (OID-Korrelation): {coin} OID={oid}")
+                        # Eintrag entfernen, damit er nicht mehrfach matched wird
+                        del _recent_fills[oid]
+                        continue
 
         # ── "open": Prüfe _recent_cancels (Variante A) ────────────────────────
         if status == "open":
