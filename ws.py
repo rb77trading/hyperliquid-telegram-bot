@@ -359,6 +359,13 @@ def _side_label(order: dict) -> str:
 _recent_opens: dict[tuple, tuple[float, dict, threading.Timer]] = {}
 _recent_cancels: dict[tuple, tuple[float, dict, threading.Timer]] = {}
 
+# Schützt _recent_opens UND _recent_cancels vor gleichzeitigen Zugriffen aus
+# dem WS-Thread (_find_match/_buffer_order) und den threading.Timer-Threads
+# (_flush_open_notify/_flush_cancel_notify). Ein einziges Lock für beide
+# Dicts reicht, da sie ohnehin nie unabhängig voneinander gebraucht werden
+# und ein Deadlock-Risiko durch mehrere Locks so von vornherein entfällt.
+_buffer_lock = threading.Lock()
+
 def _make_key(order: dict) -> tuple:
     """
     Erstellt einen eindeutigen Key aus den Order-Merkmalen.
@@ -392,6 +399,10 @@ def _find_match(order: dict, buffer: dict) -> Optional[dict]:
       - Beides geändert (andere Größe AND anderer Preis) → ❌ kein Match
         (zwei komplett verschiedene Orders)
 
+    Thread-sicher: Läuft komplett unter _buffer_lock, da parallel dazu
+    ein Timer-Thread denselben Puffer verändern könnte (siehe
+    _flush_open_notify/_flush_cancel_notify).
+
     Args:
         order:  Die aktuelle Order (aus dem neuen Event).
         buffer: Der Puffer-Dict, der durchsucht werden soll.
@@ -407,31 +418,32 @@ def _find_match(order: dict, buffer: dict) -> Optional[dict]:
     now = time.time()
     cutoff = now - EDIT_WINDOW
 
-    for key, (ts, old_order, timer) in list(buffer.items()):
-        # Verfallene Einträge aufräumen (Timer abbrechen + Eintrag löschen)
-        if ts < cutoff:
-            timer.cancel()
-            del buffer[key]
-            continue
+    with _buffer_lock:
+        for key, (ts, old_order, timer) in list(buffer.items()):
+            # Verfallene Einträge aufräumen (Timer abbrechen + Eintrag löschen)
+            if ts < cutoff:
+                timer.cancel()
+                buffer.pop(key, None)
+                continue
 
-        # Coin + Side müssen matchen
-        if old_order.get("coin") != new_coin:
-            continue
-        if old_order.get("side") != new_side:
-            continue
+            # Coin + Side müssen matchen
+            if old_order.get("coin") != new_coin:
+                continue
+            if old_order.get("side") != new_side:
+                continue
 
-        old_px = float(old_order.get("limitPx", 0))
-        old_sz = float(old_order.get("origSz", 0))
+            old_px = float(old_order.get("limitPx", 0))
+            old_sz = float(old_order.get("origSz", 0))
 
-        # Edit nur wenn Größe ODER Preis gleich ist
-        # (bei zwei komplett verschiedenen Orders sind beide anders)
-        if old_sz == new_sz or old_px == new_px:
-            # Match gefunden → Timer abbrechen, Eintrag entfernen
-            timer.cancel()
-            del buffer[key]
-            return old_order
+            # Edit nur wenn Größe ODER Preis gleich ist
+            # (bei zwei komplett verschiedenen Orders sind beide anders)
+            if old_sz == new_sz or old_px == new_px:
+                # Match gefunden → Timer abbrechen, Eintrag entfernen
+                timer.cancel()
+                buffer.pop(key, None)
+                return old_order
 
-    return None
+        return None
 
 
 def _buffer_order(order: dict, buffer: dict, flush_func) -> None:
@@ -444,6 +456,11 @@ def _buffer_order(order: dict, buffer: dict, flush_func) -> None:
     gesendet. Wenn der Timer abläuft, wird die normale Nachricht
     (z. B. "📝 Order plaziert" oder "❌ Order storniert") gesendet.
 
+    Der Eintrag wird ZUERST in den Puffer geschrieben und ERST DANACH
+    der Timer gestartet, damit _flush_open_notify/_flush_cancel_notify
+    beim (theoretisch möglichen) sofortigen Ablauf immer einen
+    vorhandenen Eintrag zum Entfernen vorfinden.
+
     Args:
         order:      Das Order-Objekt.
         buffer:     Der Puffer-Dict, in den die Order gelegt wird.
@@ -451,14 +468,13 @@ def _buffer_order(order: dict, buffer: dict, flush_func) -> None:
                     (sendet die "normale" Nachricht).
     """
     key = _make_key(order)
-
-    # Timer erstellen: nach EDIT_WINDOW Sekunden → flush_func(order, key)
     timer = threading.Timer(EDIT_WINDOW, flush_func, args=[order, key])
     timer.daemon = True  # Thread beendet sich mit dem Hauptprozess
-    timer.start()
 
-    # In den Puffer eintragen
-    buffer[key] = (time.time(), order, timer)
+    with _buffer_lock:
+        buffer[key] = (time.time(), order, timer)
+
+    timer.start()
 
 
 def _flush_open_notify(order: dict, key: tuple) -> None:
@@ -470,7 +486,8 @@ def _flush_open_notify(order: dict, key: tuple) -> None:
         order: Das Order-Objekt.
         key:   Der Key im _recent_opens-Dict (zum Aufräumen).
     """
-    _recent_opens.pop(key, None)
+    with _buffer_lock:
+        _recent_opens.pop(key, None)
     _notify_order_update(order, "open")
 
 
@@ -483,7 +500,8 @@ def _flush_cancel_notify(order: dict, key: tuple) -> None:
         order: Das Order-Objekt.
         key:   Der Key im _recent_cancels-Dict (zum Aufräumen).
     """
-    _recent_cancels.pop(key, None)
+    with _buffer_lock:
+        _recent_cancels.pop(key, None)
     _notify_order_update(order, "canceled")
 
 
@@ -680,6 +698,8 @@ def _notify_fill(fill: dict) -> None:
 #
 # NICHT BENACHRICHTIGEN:
 # - "filled" → wird bereits via userFills gemeldet
+# - "open"/"canceled" bei tif="Ioc" (Market-Orders) → Slippage-Preis der
+#   IOC-Implementierung, keine echte Order-Anzeige; Fill kommt via userFills
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _on_order_updates(ws_msg: dict) -> None:
@@ -714,6 +734,35 @@ def _on_order_updates(ws_msg: dict) -> None:
         order = update.get("order", {})
 
         if status not in ("open", "canceled", "triggered", "rejected"):
+            continue
+
+        # ── Market-Orders bei "open"/"canceled" ignorieren ────────────────────
+        #
+        # Hyperliquid implementiert eine Market-Order intern als IOC-Limit-
+        # Order mit limitPx = Marktpreis × (1 ± Slippage, Standard 8 %).
+        # Dieser Preis hat NICHTS mit dem tatsächlichen Fill-Preis zu tun
+        # (der bereits zuverlässig über userFills/_on_fills gemeldet wird).
+        #
+        # Da orderUpdates ein VOM userFills-Channel unabhängiger Kanal ist,
+        # kommt die "open"-Meldung für die Market-Order oft zeitversetzt
+        # (teils Sekunden später) nach dem Fill an und würde ohne diesen
+        # Filter als verwirrende, zusätzliche "Order plaziert"-Nachricht mit
+        # falschem Preis auftauchen – obwohl es dieselbe, bereits gemeldete
+        # Order ist.
+        #
+        # "triggered"/"rejected" werden weiterhin gemeldet (z. B. eine
+        # abgelehnte Market-Order wegen fehlender Liquidität ist relevant).
+        # Stop-Market/Take-Profit-Trigger-Orders sind NICHT betroffen, da sie
+        # isTrigger=true haben und nicht "Ioc" als tif nutzen.
+        #
+        # WICHTIG: orderType allein reicht hier NICHT als Filter – getestet
+        # meldet Hyperliquid diese Orders offenbar mit orderType="Limit",
+        # nicht "Market" (die Order IST intern technisch eine Limit-Order,
+        # nur mit tif=Ioc). Das zuverlässige Signal ist daher tif == "Ioc":
+        # eine IOC-Order "rastet" per Definition nie wirklich auf dem
+        # Orderbuch ein – sie füllt sofort (→ userFills) oder wird verworfen.
+        logger.info(f"DEBUG order: {order}")
+        if status in ("open", "canceled") and order.get("tif") == "Ioc":
             continue
 
         # ── "open": Prüfe _recent_cancels (Variante A) ────────────────────────
@@ -1154,4 +1203,4 @@ def _run_websocket() -> None:
         # Backoff-Reset nach erfolgreichem (Re)Connect
         # Wenn wir hier sind, wurde die Verbindung erfolgreich aufgebaut.
         # Bei einem erneuten Disconnect startet der Backoff wieder bei 1s.
-        delay = 1   
+        delay = 1

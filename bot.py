@@ -79,8 +79,8 @@ IMAGE_BALANCE   = IMAGE_DIR / "balance.png"
 IMAGE_POSITIONS = IMAGE_DIR / "positions.png"
 IMAGE_ORDERS    = IMAGE_DIR / "orders.png"
 
-# Haupt-Menü (immer sichtbar)
-MENU_KEYBOARD = InlineKeyboardMarkup([
+# Haupt-Menü (Basis-Buttons, immer vorhanden)
+_BASE_MENU_ROWS = [
     [
         InlineKeyboardButton("📊 Kontostand", callback_data="balance"),
         InlineKeyboardButton("📈 Positionen", callback_data="positions"),
@@ -88,7 +88,22 @@ MENU_KEYBOARD = InlineKeyboardMarkup([
     [
         InlineKeyboardButton("⏳ Offene Orders", callback_data="orders"),
     ],
-])
+]
+
+
+def _build_menu_keyboard() -> InlineKeyboardMarkup:
+    """
+    Baut das Haupt-Menü-Keyboard.
+
+    Zusätzlich zu den Telegram-Buttons (Kontostand/Positionen/Orders)
+    wird ein verlinkter "🌐 Web-Dashboard"-Button angehängt, WENN das
+    Web-Dashboard aktiviert und aktuell erreichbar ist. So bleiben
+    beide Wege (Telegram-Ansicht UND Dashboard-Link) parallel nutzbar.
+    """
+    rows = list(_BASE_MENU_ROWS)
+    if WEB_ENABLED and _is_web_reachable(WEB_PORT):
+        rows.append([InlineKeyboardButton("🌐 Web-Dashboard", url=WEB_URL)])
+    return InlineKeyboardMarkup(rows)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -124,25 +139,20 @@ def _is_web_reachable(port: int, timeout: float = 2.0) -> bool:
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Wird bei /start oder /menu aufgerufen.
-    Sendet die Menü-Nachricht. Falls Web-Dashboard erreichbar,
-    wird zusätzlich ein Direktlink gesendet.
+
+    Sendet immer die Menü-Nachricht mit den Telegram-Buttons
+    (Kontostand/Positionen/Orders). Ist das Web-Dashboard erreichbar,
+    wird zusätzlich ein verlinkter "🌐 Web-Dashboard"-Button angezeigt –
+    beide Wege bleiben so parallel nutzbar.
     """
     context.bot_data["hl_chat_id"] = update.effective_chat.id
-
-    # Web-Link als erste Nachricht (falls erreichbar)
-    if WEB_ENABLED and _is_web_reachable(WEB_PORT):
-        await update.message.reply_text(
-            f"🌐 <b>Dashboard öffnen:</b>\n<a href=\"{WEB_URL}\">{WEB_URL}</a>",
-            parse_mode="HTML",
-            disable_web_page_preview=True,
-        )
 
     with open(IMAGE_MENU, "rb") as f:
         await update.message.reply_photo(
             photo=f,
             caption="🌐 <b>Hyperliquid Dashboard</b>\n\nWähle eine Ansicht:",
             parse_mode="HTML",
-            reply_markup=MENU_KEYBOARD,
+            reply_markup=_build_menu_keyboard(),
         )
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -205,7 +215,7 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         ] + button_rows
         markup = InlineKeyboardMarkup(all_rows)
     else:
-        markup = MENU_KEYBOARD
+        markup = _build_menu_keyboard()
 
     with open(image_path, "rb") as f:
         media = InputMediaPhoto(
@@ -579,7 +589,7 @@ async def _refresh_orders_view(query, context: ContextTypes.DEFAULT_TYPE) -> Non
         ] + button_rows
         markup = InlineKeyboardMarkup(all_rows)
     else:
-        markup = MENU_KEYBOARD
+        markup = _build_menu_keyboard()
 
     with open(IMAGE_ORDERS, "rb") as f:
         media = InputMediaPhoto(media=f, caption=caption, parse_mode="HTML")
@@ -595,40 +605,36 @@ async def _post_init(app: Application) -> None:
     """
     Wird nach dem Bot-Start aufgerufen.
     - Setzt Bot-Befehle (/menu)
-    - Prüft Webserver-Erreichbarkeit → Menü-Button entsprechend setzen
+    - Setzt den Chat-Menü-Button
     - Startet den WebSocket-Listener
+
+    Hinweis zum Dashboard-Link:
+    Telegram kann den Chat-Menü-Button nur dann direkt eine Web-App
+    öffnen lassen (MenuButtonWebApp), wenn die URL mit https:// beginnt.
+    WEB_URL ist in der Praxis meist eine lokale http://-Adresse (LAN-IP),
+    daher wird hier bewusst KEIN MenuButtonWebApp gesetzt – der Menü-
+    Button bleibt immer MenuButtonCommands (öffnet /menu). Den Dashboard-
+    Link selbst verschickt cmd_start() als eigene Nachricht, sobald der
+    Webserver erreichbar ist.
     """
     await app.bot.set_my_commands([
         BotCommand("menu", "🌐 Hyperliquid Dashboard"),
     ])
 
-    # ── Menü-Button: Web oder Telegram? ──────────────────────────────────────
-    web_active = False
+    await app.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
 
+    # ── Nur fürs Logging: Erreichbarkeit einmalig prüfen ─────────────────────
     if WEB_ENABLED:
-        # Erreichbarkeitsprüfung: Ist der Webserver lokal erreichbar?
-        web_active = _is_web_reachable(WEB_PORT)
-
-        if web_active:
-            await app.bot.set_chat_menu_button(
-                menu_button=MenuButtonCommands()
-            )
-            logger.info(f"Menü-Button → Web: {WEB_URL}")
+        if _is_web_reachable(WEB_PORT):
+            logger.info(f"Web-Dashboard erreichbar – Link wird bei /menu gesendet: {WEB_URL}")
         else:
-            # Webserver nicht erreichbar → Fallback auf Telegram
-            await app.bot.set_chat_menu_button(
-                menu_button=MenuButtonCommands()
-            )
             logger.warning(
                 f"Web-Dashboard nicht erreichbar (Port {WEB_PORT}). "
-                f"Menü-Button → Telegram-Betrieb. "
+                f"Kein Dashboard-Link, bis der Webserver läuft. "
                 f"(Starte den Webserver mit 'make web')"
             )
     else:
-        await app.bot.set_chat_menu_button(
-            menu_button=MenuButtonCommands()
-        )
-        logger.info("Menü-Button → Telegram-Betrieb (WEB_ENABLED=False)")
+        logger.info("Web-Dashboard deaktiviert (WEB_ENABLED=False)")
 
     # ── WebSocket-Listener starten ────────────────────────────────────────────
     start_ws_listener(app)
@@ -710,4 +716,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()   
+    main()

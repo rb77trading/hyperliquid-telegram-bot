@@ -129,8 +129,9 @@ def format_orders(summary: AccountSummary, trading_enabled: bool = False) -> tup
         for o in orders:
             side_emoji = "🟢" if o.side == "B" else "🔴"
             side_label = "BUY" if o.side == "B" else "SELL"
+            prefix = f"[{order_index + 1}] " if trading_enabled else ""
             lines.append(
-                f"[{order_index + 1}] {side_emoji} {side_label} {o.size:.4f} {o.coin} "
+                f"{prefix}{side_emoji} {side_label} {o.size:.4f} {o.coin} "
                 f"@ ${o.limit_px:,.2f} (Wert: {o.notional:.2f} USDC)"
             )
 
