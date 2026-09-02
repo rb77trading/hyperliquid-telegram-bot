@@ -4,7 +4,7 @@
 
 ## ⚠️ Haftungsausschluss (Disclaimer)
 
-> **WICHTIG**: Dieses Projekt dient ausschließlich zu **Bildungszwecken** und stellt **keine Finanzberatung** dar. Kryptowährungen und Derivate sind hochvolatil – du kannst dein gesamtes investierte Kapital verlieren.
+> **WICHTIG**: Dieses Projekt dient ausschließlich zu **Bildungszwecken** und stellt **keine Finanzberatung** dar. Kryptowährungen und Derivate sind hochvolatil – du kannst dein gesamtes investiertes Kapital verlieren.
 >
 > - Der Autor übernimmt **keine Haftung** für finanzielle Verluste oder Schäden, die durch die Nutzung dieses Bots entstehen.
 > - Teste alle Funktionen immer zuerst mit kleinen Beträgen oder im Testnet.
@@ -160,18 +160,28 @@ Besuche `http://localhost:8000` im Browser.
 ### Projektstruktur
 ```
 hype-telegram-bot/
-├── bot.py           # Telegram-Bot Entry-Point
-├── ws.py            # WebSocket-Listener (Echtzeit-Events)
-├── hl_api.py        # Hyperliquid API-Kommunikation
-├── trader.py        # Order-Aktionen (Cancel, Modify, Place)
-├── formatters.py    # Telegram-HTML-Formatierung
-├── models.py        # Datenstrukturen (Dataclasses)
-├── app.py           # Web-Dashboard (FastAPI)
-├── config.py        # Konfiguration (lädt .env)
-├── .env             # Sensitive Konfiguration (nicht in Git)
-├── .env.example     # Template für .env
-├── requirements.txt  # Python-Abhängigkeiten
-└── README.md        # Diese Datei
+├── bot.py              # Telegram-Bot Entry-Point
+├── ws.py               # WebSocket-Listener (Echtzeit-Events)
+├── hl_api.py           # Hyperliquid API-Kommunikation
+├── trader.py           # Order-Aktionen (Cancel, Modify, Place)
+├── formatters.py       # Telegram-HTML-Formatierung
+├── models.py           # Datenstrukturen (Dataclasses)
+├── app.py              # Web-Dashboard (FastAPI)
+├── config.py           # Konfiguration (lädt .env)
+├── .env                # Sensitive Konfiguration (nicht in Git)
+├── .env.example        # Template für .env
+├── requirements.txt    # Python-Abhängigkeiten
+├── templates/          # HTML-Templates für Web-Dashboard
+│   └── dashboard.html  # Haupt-Dashboard Template
+├── images/             # Bilder für Telegram-Dashboard
+│   ├── menu.png        # Hauptmenü-Bild
+│   ├── balance.png     # Kontostand-Bild
+│   ├── positions.png   # Positionen-Bild
+│   └── orders.png      # Orders-Bild
+├── .venv/              # Virtual Environment (nicht in Git)
+├── .gitignore          # Git-Ignore-Regeln
+├── LICENSE             # Apache 2.0 Lizenz
+└── README.md           # Diese Datei
 ```
 
 ### Technische Highlights
@@ -219,7 +229,7 @@ Für zusätzliche Sicherheit kann die `.env`-Datei verschlüsselt werden. Dies i
 
 ## 📄 Lizenz
 
-MIT License – siehe LICENSE-Datei für Details.
+Apache License 2.0 – siehe LICENSE-Datei für Details.
 
 ## 🤝 Beiträge
 
